@@ -1,219 +1,384 @@
 from json import JSONDecodeError
+from typing import Dict, List, Optional, Union, Any
 
-import flask
-from flask import Flask, request
+from fastapi import FastAPI, Response, HTTPException, Query, Path
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse, JSONResponse
+from pydantic import BaseModel, Field,RootModel
 
 try:
     from nepse import Nepse
 except ImportError:
     import sys
-
     sys.path.append("../")
     from nepse import Nepse
 
-app = Flask(__name__)
-app.config["PROPAGATE_EXCEPTIONS"] = True
+# Define models for documentation
+class NepseIndexModel(BaseModel):
+    index: str
+    currentValue: float = Field(..., description="Current value of the index")
+    previousValue: float = Field(..., description="Previous value of the index")
+    pointChange: float = Field(..., description="Point change in the index")
+    percentageChange: float = Field(..., description="Percentage change in the index")
 
+class CompanyModel(BaseModel):
+    symbol: str = Field(..., description="Company symbol/ticker")
+    securityName: str = Field(..., description="Name of the security")
+    securityId: int = Field(..., description="Security ID")
+    sectorName: str = Field(..., description="Sector the company belongs to")
+    instrumentType: str = Field(..., description="Type of instrument")
+    totalQuantity: Optional[int] = Field(None, description="Total quantity of shares")
+    
+class ScripPriceModel(BaseModel):
+    date: str = Field(..., description="Date of the price data")
+    open: float = Field(..., description="Opening price")
+    high: float = Field(..., description="Highest price")
+    low: float = Field(..., description="Lowest price")
+    close: float = Field(..., description="Closing price")
+    volume: int = Field(..., description="Trading volume")
+
+class SummaryResponse(BaseModel):
+   RootModel: Dict[str, Any] = Field(..., description="Summary of market data")
+
+# Create FastAPI app
+app = FastAPI(
+    title="Nepal Stock Exchange API",
+    description="""
+    API for Nepal Stock Exchange (NEPSE) market data. 
+    
+    This API provides access to real-time and historical data from the Nepal Stock Exchange,
+    including indices, stock prices, company information, and market statistics.
+    
+    All endpoints return JSON responses unless otherwise specified.
+    """,
+    version="1.0.0",
+    contact={
+        "name": "NEPSE API",
+        "url": "https://www.nepalstock.com/",
+    },
+    license_info={
+        "name": "MIT License",
+    },
+    openapi_tags=[
+        {
+            "name": "Market Indices",
+            "description": "Endpoints related to market indices and sub-indices",
+        },
+        {
+            "name": "Company Data",
+            "description": "Endpoints for company and security information",
+        },
+        {
+            "name": "Market Statistics",
+            "description": "Endpoints for various market statistics and rankings",
+        },
+        {
+            "name": "Price Data",
+            "description": "Endpoints for price and volume data",
+        },
+    ],
+)
+
+# Add CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 nepse = Nepse()
 nepse.setTLSVerification(False)
 
 routes = {
-    "PriceVolume": "/PriceVolume",
-    "Summary": "/Summary",
-    "SupplyDemand": "/SupplyDemand",
-    "TopGainers": "/TopGainers",
-    "TopLosers": "/TopLosers",
-    "TopTenTradeScrips": "/TopTenTradeScrips",
-    "TopTenTurnoverScrips": "/TopTenTurnoverScrips",
-    "TopTenTransactionScrips": "/TopTenTransactionScrips",
-    "IsNepseOpen": "/IsNepseOpen",
-    "NepseIndex": "/NepseIndex",
-    "NepseSubIndices": "/NepseSubIndices",
-    "DailyNepseIndexGraph": "/DailyNepseIndexGraph",
-    "DailyScripPriceGraph": "/DailyScripPriceGraph",
-    "CompanyList": "/CompanyList",
-    "SecurityList": "/SecurityList",
-    "TradeTurnoverTransactionSubindices": "/TradeTurnoverTransactionSubindices",
-    "LiveMarket": "/LiveMarket",
-    "MarketDepth": "/MarketDepth",
+    "PriceVolume": "/price-volume",
+    "Summary": "/summary",
+    "SupplyDemand": "/supply-demand",
+    "TopGainers": "/top-gainers",
+    "TopLosers": "/top-losers",
+    "TopTenTradeScrips": "/top-ten-trade-scrips",
+    "TopTenTurnoverScrips": "/top-ten-turnover-scrips",
+    "TopTenTransactionScrips": "/top-ten-transaction-scrips",
+    "IsNepseOpen": "/is-nepse-open",
+    "NepseIndex": "/nepse-index",
+    "NepseSubIndices": "/nepse-sub-indices",
+    "DailyNepseIndexGraph": "/daily-nepse-index-graph",
+    "DailyScripPriceGraph": "/daily-scrip-price-graph",
+    "CompanyList": "/company-list",
+    "SecurityList": "/security-list",
+    "TradeTurnoverTransactionSubindices": "/trade-turnover-transaction-subindices",
+    "LiveMarket": "/live-market",
+    "MarketDepth": "/market-depth",
 }
 
 
-@app.route("/")
-def getIndex():
-    content = "<BR>".join(
-        [f"<a href={value}> {key} </a>" for key, value in routes.items()]
-    )
-    return f"Serverving hot stock data <BR>{content}"
+@app.get("/")
+def get_root():
+    return {
+        "message": "Welcome to the Nepal Stock Exchange API",
+        "description": "This API provides access to NEPSE market data.",
+        "available_routes": routes,
+        "documentation": {
+            "openapi": "/openapi.json",
+            "swagger": "/docs",
+        }
+    }
 
 
-@app.route(routes["Summary"])
-def getSummary():
-    response = flask.jsonify(_getSummary())
-    response.headers.add("Access-Control-Allow-Origin", "*")
-    return response
+@app.get(
+    routes["Summary"],
+    response_model=SummaryResponse,
+    tags=["Market Statistics"],
+    summary="Get market summary",
+    description="Returns the summary of today's market activity including turnover, volume, and other key metrics"
+)
+def get_summary():
+    return _get_summary()
 
 
-def _getSummary():
+def _get_summary():
     response = dict()
     for obj in nepse.getSummary():
         response[obj["detail"]] = obj["value"]
     return response
 
 
-@app.route(routes["NepseIndex"])
-def getNepseIndex():
-    response = flask.jsonify(_getNepseIndex())
-    response.headers.add("Access-Control-Allow-Origin", "*")
-    return response
+@app.get(
+    routes["NepseIndex"],
+    tags=["Market Indices"],
+    summary="Get Nepse Index",
+    description="Returns the current NEPSE index value along with change information"
+)
+def get_nepse_index():
+    return _get_nepse_index()
 
 
-def _getNepseIndex():
+def _get_nepse_index():
     response = dict()
     for obj in nepse.getNepseIndex():
         response[obj["index"]] = obj
     return response
 
 
-@app.route(routes["NepseSubIndices"])
-def getNepseSubIndices():
-    response = flask.jsonify(_getNepseSubIndices())
-    response.headers.add("Access-Control-Allow-Origin", "*")
-    return response
+@app.get(
+    routes["NepseSubIndices"],
+    tags=["Market Indices"],
+    summary="Get Nepse Sub-Indices",
+    description="Returns all sub-indices of NEPSE including banking, development banks, hydropower, etc."
+)
+def get_nepse_sub_indices():
+    return _get_nepse_sub_indices()
 
 
-def _getNepseSubIndices():
+def _get_nepse_sub_indices():
     response = dict()
     for obj in nepse.getNepseSubIndices():
         response[obj["index"]] = obj
     return response
 
 
-@app.route(routes["TopTenTradeScrips"])
-def getTopTenTradeScrips():
-    response = flask.jsonify(nepse.getTopTenTradeScrips())
-    response.headers.add("Access-Control-Allow-Origin", "*")
-    return response
+@app.get(
+    routes["TopTenTradeScrips"],
+    tags=["Market Statistics"],
+    summary="Get top ten trade scrips",
+    description="Returns the top ten scrips by trade volume"
+)
+def get_top_ten_trade_scrips():
+    return nepse.getTopTenTradeScrips()
 
 
-@app.route(routes["TopTenTransactionScrips"])
-def getTopTenTransactionScrips():
-    response = flask.jsonify(nepse.getTopTenTransactionScrips())
-    response.headers.add("Access-Control-Allow-Origin", "*")
-    return response
+@app.get(
+    routes["TopTenTransactionScrips"],
+    tags=["Market Statistics"],
+    summary="Get top ten transaction scrips",
+    description="Returns the top ten scrips by number of transactions"
+)
+def get_top_ten_transaction_scrips():
+    return nepse.getTopTenTransactionScrips()
 
 
-@app.route(routes["TopTenTurnoverScrips"])
-def getTopTenTurnoverScrips():
-    response = flask.jsonify(nepse.getTopTenTurnoverScrips())
-    response.headers.add("Access-Control-Allow-Origin", "*")
-    return response
+@app.get(
+    routes["TopTenTurnoverScrips"],
+    tags=["Market Statistics"],
+    summary="Get top ten turnover scrips",
+    description="Returns the top ten scrips by turnover value"
+)
+def get_top_ten_turnover_scrips():
+    return nepse.getTopTenTurnoverScrips()
 
 
-@app.route(routes["SupplyDemand"])
-def getSupplyDemand():
-    response = flask.jsonify(nepse.getSupplyDemand())
-    response.headers.add("Access-Control-Allow-Origin", "*")
-    return response
+@app.get(
+    routes["SupplyDemand"],
+    tags=["Market Statistics"],
+    summary="Get supply and demand data",
+    description="Returns the supply and demand statistics for the market"
+)
+def get_supply_demand():
+    return nepse.getSupplyDemand()
 
 
-@app.route(routes["TopGainers"])
-def getTopGainers():
-    response = flask.jsonify(nepse.getTopGainers())
-    response.headers.add("Access-Control-Allow-Origin", "*")
-    return response
+@app.get(
+    routes["TopGainers"],
+    tags=["Market Statistics"],
+    summary="Get top gainers",
+    description="Returns the list of stocks with highest positive price change"
+)
+def get_top_gainers():
+    return nepse.getTopGainers()
 
 
-@app.route(routes["TopLosers"])
-def getTopLosers():
-    response = flask.jsonify(nepse.getTopLosers())
-    response.headers.add("Access-Control-Allow-Origin", "*")
-    return response
+@app.get(
+    routes["TopLosers"],
+    tags=["Market Statistics"],
+    summary="Get top losers",
+    description="Returns the list of stocks with highest negative price change"
+)
+def get_top_losers():
+    return nepse.getTopLosers()
 
 
-@app.route(routes["IsNepseOpen"])
-def isNepseOpen():
-    response = flask.jsonify(nepse.isNepseOpen())
-    response.headers.add("Access-Control-Allow-Origin", "*")
-    return response
+@app.get(
+    routes["IsNepseOpen"],
+    tags=["Market Statistics"],
+    summary="Check if NEPSE is open",
+    description="Returns whether the Nepal Stock Exchange is currently open for trading"
+)
+def is_nepse_open():
+    return nepse.isNepseOpen()
 
 
-@app.route(routes["DailyNepseIndexGraph"])
-def getDailyNepseIndexGraph():
-    response = flask.jsonify(nepse.getDailyNepseIndexGraph())
-    response.headers.add("Access-Control-Allow-Origin", "*")
-    return response
+@app.get(
+    routes["DailyNepseIndexGraph"],
+    tags=["Market Indices"],
+    summary="Get daily NEPSE index graph data",
+    description="Returns historical data for the NEPSE index that can be used to generate graphs"
+)
+def get_daily_nepse_index_graph():
+    return nepse.getDailyNepseIndexGraph()
 
 
-@app.route(f"{routes['DailyScripPriceGraph']}", defaults={"symbol": None})
-@app.route(f"{routes['DailyScripPriceGraph']}/<string:symbol>")
-def getDailyScripPriceGraph(symbol):
-    if symbol:
-        response = flask.jsonify(nepse.getDailyScripPriceGraph(symbol))
-        response.headers.add("Access-Control-Allow-Origin", "*")
-    else:
-        symbols = nepse.getSecurityList()
-        response = "<BR>".join(
-            [
-                f"<a href={routes['DailyScripPriceGraph']}/{symbol['symbol']}> {symbol['symbol']} </a>"
-                for symbol in symbols
-            ]
-        )
-    return response
+@app.get(
+    f"{routes['DailyScripPriceGraph']}",
+    response_class=HTMLResponse,
+    tags=["Price Data"],
+    summary="List all available scrips"
+)
+def list_daily_scrip_price_graph():
+    symbols = nepse.getSecurityList()
+    response = "<BR>".join(
+        [
+            f"<a href={routes['DailyScripPriceGraph']}/{symbol['symbol']}> {symbol['symbol']} </a>"
+            for symbol in symbols
+        ]
+    )
+    return HTMLResponse(content=f"<h1>Available Scrips</h1>{response}")
+
+@app.get(
+    f"{routes['DailyScripPriceGraph']}/{{symbol}}",
+    tags=["Price Data"],
+    summary="Get daily price graph for a specific scrip",
+    description="Returns the historical price data for the specified stock symbol",
+    response_model=List[Dict[str, Any]]
+)
+def get_daily_scrip_price_graph(
+    symbol: str = Path(..., description="Stock symbol/ticker to fetch data for")
+):
+    try:
+        return nepse.getDailyScripPriceGraph(symbol)
+    except Exception as e:
+        raise HTTPException(status_code=404, detail=f"Data for symbol {symbol} not found: {str(e)}")
 
 
-@app.route(routes["CompanyList"])
-def getCompanyList():
-    response = flask.jsonify(nepse.getCompanyList())
-    response.headers.add("Access-Control-Allow-Origin", "*")
-    return response
+@app.get(
+    routes["CompanyList"],
+    tags=["Company Data"],
+    summary="Get company list",
+    description="Returns the list of all companies listed on NEPSE"
+)
+def get_company_list():
+    return nepse.getCompanyList()
 
 
-@app.route(routes["CompanyList"])
-def getSecurityList():
-    response = flask.jsonify(nepse.getSecurityList())
-    response.headers.add("Access-Control-Allow-Origin", "*")
-    return response
+@app.get(
+    routes["SecurityList"],
+    tags=["Company Data"],
+    summary="Get security list",
+    description="Returns the list of all securities available on NEPSE"
+)
+def get_security_list():
+    return nepse.getSecurityList()
 
 
-@app.route(routes["PriceVolume"])
-def getPriceVolume():
-    response = flask.jsonify(nepse.getPriceVolume())
-    response.headers.add("Access-Control-Allow-Origin", "*")
-    return response
+@app.get(
+    routes["PriceVolume"],
+    tags=["Price Data"],
+    summary="Get price and volume data",
+    description="Returns price and volume data for all securities"
+)
+def get_price_volume():
+    return nepse.getPriceVolume()
 
 
-@app.route(routes["LiveMarket"])
-def getLiveMarket():
-    response = flask.jsonify(nepse.getLiveMarket())
-    response.headers.add("Access-Control-Allow-Origin", "*")
-    return response
+@app.get(
+    routes["LiveMarket"],
+    tags=["Market Statistics"],
+    summary="Get live market data",
+    description="Returns real-time market data for all securities currently trading"
+)
+def get_live_market():
+    return nepse.getLiveMarket()
 
 
-@app.route(f"{routes['MarketDepth']}", defaults={"symbol": None})
-@app.route(f"{routes['MarketDepth']}/<string:symbol>")
-def getMarketDepth(symbol):
-    if symbol:
-        try:
-            response = flask.jsonify(nepse.getSymbolMarketDepth(symbol))
-            response.headers.add("Access-Control-Allow-Origin", "*")
-            return response
-        except JSONDecodeError:
-            return flask.jsonify(None)
-    else:
-        symbols = nepse.getSecurityList()
-        response = "<BR>".join(
-            [
-                f"<a href={routes['MarketDepth']}/{symbol['symbol']}> {symbol['symbol']} </a>"
-                for symbol in symbols
-            ]
-        )
-        return response
+@app.get(
+    f"{routes['MarketDepth']}",
+    response_class=HTMLResponse,
+    tags=["Market Statistics"],
+    summary="List all symbols for market depth"
+)
+def list_market_depth():
+    symbols = nepse.getSecurityList()
+    response = "<BR>".join(
+        [
+            f"<a href={routes['MarketDepth']}/{symbol['symbol']}> {symbol['symbol']} </a>"
+            for symbol in symbols
+        ]
+    )
+    return HTMLResponse(content=f"<h1>Market Depth - Available Symbols</h1>{response}")
+
+@app.get(
+    f"{routes['MarketDepth']}/{{symbol}}",
+    tags=["Market Statistics"],
+    summary="Get market depth for a specific symbol",
+    description="Returns buy/sell orders in the order book for the specified symbol"
+)
+def get_market_depth(
+    symbol: str = Path(..., description="Stock symbol/ticker to fetch market depth for")
+):
+    try:
+        data = nepse.getSymbolMarketDepth(symbol)
+        if data is None:
+            raise HTTPException(status_code=404, detail=f"Market depth for {symbol} not available")
+        return data
+    except JSONDecodeError:
+        raise HTTPException(status_code=404, detail=f"Invalid data received for {symbol}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching market depth: {str(e)}")
 
 
-@app.route(routes["TradeTurnoverTransactionSubindices"])
-def getTradeTurnoverTransactionSubindices():
+@app.get(
+    routes["TradeTurnoverTransactionSubindices"],
+    tags=["Market Statistics"],
+    summary="Get comprehensive market statistics",
+    description="""
+    Returns detailed statistics for all sectors and securities, including:
+    - Trade volume by security and sector
+    - Turnover by security and sector
+    - Transaction counts by security and sector
+    - Sub-index performance
+    """
+)
+def get_trade_turnover_transaction_subindices():
     companies = {company["symbol"]: company for company in nepse.getCompanyList()}
     turnover = {obj["symbol"]: obj for obj in nepse.getTopTenTurnoverScrips()}
     transaction = {obj["symbol"]: obj for obj in nepse.getTopTenTransactionScrips()}
@@ -224,7 +389,7 @@ def getTradeTurnoverTransactionSubindices():
 
     price_vol_info = {obj["symbol"]: obj for obj in nepse.getPriceVolume()}
 
-    sector_sub_indices = _getNepseSubIndices()
+    sector_sub_indices = _get_nepse_sub_indices()
     # this is done since nepse sub indices and sector name are different
     sector_mapper = {
         "Commercial Banks": "Banking SubIndex",
@@ -305,13 +470,9 @@ def getTradeTurnoverTransactionSubindices():
             "sectorName": sector,
         }
 
-    response = flask.jsonify(
-        {"scripsDetails": scrips_details, "sectorsDetails": sector_details}
-    )
-
-    response.headers.add("Access-Control-Allow-Origin", "*")
-    return response
+    return {"scripsDetails": scrips_details, "sectorsDetails": sector_details}
 
 
 if __name__ == "__main__":
-    app.run(debug=False, host="0.0.0.0", port=8000)
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)
