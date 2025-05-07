@@ -124,7 +124,7 @@ routes = {
     "IsNepseOpen": "/is-nepse-open",
     "NepseIndex": "/nepse-index",
     "NepseSubIndices": "/nepse-sub-indices",
-    "DailyNepseIndexGraph": "/daily-nepse-index-graph",
+    "DailyNepseIndexGraph": "/daily-Nep-graph",
     "DailyScripPriceGraph": "/daily-scrip-price-graph",
     "CompanyList": "/company-list",
     "SecurityList": "/security-list",
@@ -155,10 +155,10 @@ def get_root():
     description="Returns the summary of today's market activity including turnover, volume, and other key metrics"
 )
 def get_summary():
-    return _get_summary()
+    return JSONResponse(content=_getSummary())
 
 
-def _get_summary():
+def _getSummary():
     response = dict()
     for obj in nepse.getSummary():
         response[obj["detail"]] = obj["value"]
