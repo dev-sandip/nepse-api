@@ -7,6 +7,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel, Field,RootModel
 from starlette.middleware.base import BaseHTTPMiddleware
 from token_bucket import TokenBucket
+from scalar_fastapi import get_scalar_api_reference
 try:
     from nepse import Nepse
 except ImportError:
@@ -78,6 +79,7 @@ app = FastAPI(
             "description": "Endpoints for price and volume data",
         },
     ],
+    docs_url=None, redoc_url=None
 )
 
 # Add CORS middleware
@@ -146,7 +148,12 @@ def get_root():
         }
     }
 
-
+@app.get("/docs", include_in_schema=False)
+async def scalar_html():
+    return get_scalar_api_reference(
+        openapi_url=app.openapi_url,
+        title=app.title,
+    )
 @app.get(
     routes["Summary"],
     response_model=SummaryResponse,
